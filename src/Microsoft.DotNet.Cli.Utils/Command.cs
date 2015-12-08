@@ -29,8 +29,12 @@ namespace Microsoft.DotNet.Cli.Utils
 
         private bool _running = false;
 
-        private Command(string executable, string args)
+        private readonly bool _isUnsafe;
+
+        private Command(string executable, string args, bool isUnsafe)
         {
+            _isUnsafe = isUnsafe;
+
             // Set the things we need
             var psi = new ProcessStartInfo()
             {
@@ -53,16 +57,28 @@ namespace Microsoft.DotNet.Cli.Utils
 
         public static Command Create(string executable, string args, NuGetFramework framework = null)
         {
-            ResolveExecutablePath(ref executable, ref args, framework);
+            bool isUnsafe = false;
+            ResolveExecutablePath(ref executable, ref args, ref isUnsafe, framework);
 
-            return new Command(executable, args);
+            return new Command(executable, args, isUnsafe);
         }
 
-        private static void ResolveExecutablePath(ref string executable, ref string args, NuGetFramework framework = null)
+        private static void ResolveExecutablePath(ref string executable, ref string args, ref bool isUnsafe, NuGetFramework framework = null)
         {
-            executable = 
-                ResolveExecutablePathFromProject(executable, framework) ??
-                ResolveExecutableFromPath(executable, ref args);
+            var exeFromProject = ResolveExecutablePathFromProject(executable, framework);
+            if (exeFromProject != null)
+            {
+                isUnsafe = false;
+                executable = exeFromProject;
+                return;
+            }
+
+            var exeFromPath = ResolveExecutableFromPath(executable, ref args);
+            if (exeFromPath != null)
+            {
+                isUnsafe = true;
+                executable = exeFromPath;
+            }
         }
 
         private static string ResolveExecutableFromPath(string executable, ref string args)
@@ -80,6 +96,8 @@ namespace Microsoft.DotNet.Cli.Utils
                     break;
                 }
             }
+
+            //$unsafe
 
             // On Windows, we want to avoid using "cmd" if possible (it mangles the colors, and a bunch of other things)
             // So, do a quick path search to see if we can just directly invoke it
@@ -133,7 +151,7 @@ namespace Microsoft.DotNet.Cli.Utils
 
             var commandPath = commandPackage.Library.Files
                 .First(f => Path.GetFileName(f) == commandName + FileNameSuffixes.DotNet.Exe);
-
+            
             return Path.Combine(projectContext.PackagesDirectory, commandPackage.Path, commandPath);
         }
 
@@ -309,6 +327,11 @@ namespace Microsoft.DotNet.Cli.Utils
             }
             _stdErrHandler = handler;
             return this;
+        }
+
+        public bool IsUnsafe
+        {
+            get { return _isUnsafe; }
         }
 
         private string FormatProcessInfo(ProcessStartInfo info)
